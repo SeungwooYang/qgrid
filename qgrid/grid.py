@@ -5,7 +5,7 @@ import json
 
 from IPython.display import display
 from numbers import Integral
-from traitlets import Unicode, Instance, Bool, Integer, Dict, List, Tuple, Any
+from traitlets import Unicode, Instance, Bool, Integer, Dict, List, Tuple, Any, All, parse_notifier_name
 from traitlets.utils.bunch import Bunch
 
 # versions of pandas prior to version 0.20.0 don't support the orient='table'
@@ -68,7 +68,40 @@ class _DefaultSettings(object):
         return self._precision or pd.get_option('display.precision') - 1
 
 
+class _EventHandlers(object):
+
+    def __init__(self):
+        self._listeners = {}
+
+    def on(self, handler, name):
+        if name not in self._listeners:
+            nlist = []
+            self._listeners[name] = nlist
+        else:
+            nlist = self._listeners[name]
+        if handler not in nlist:
+            nlist.append(handler)
+
+    def off(self, handler, name):
+        try:
+            if handler is None:
+                del self._listeners[name]
+            else:
+                self._listeners[name].remove(handler)
+        except KeyError:
+            pass
+
+    def notify_listeners(self, event):
+        callables = []
+        callables.extend(self._listeners.get(event['name'], []))
+        callables.extend(self._listeners.get('All', []))
+
+        for c in callables:
+            c(event)
+
+
 defaults = _DefaultSettings()
+handlers = _EventHandlers()
 
 
 def set_defaults(show_toolbar=None, precision=None, grid_options=None):
@@ -93,8 +126,53 @@ def set_defaults(show_toolbar=None, precision=None, grid_options=None):
     QgridWidget :
         The widget whose default behavior is changed by ``set_defaults``.
     """
-    defaults.set_defaults(show_toolbar=show_toolbar, precision=precision,
+    defaults.set_defaults(show_toolbar=show_toolbar,
+                          precision=precision,
                           grid_options=grid_options)
+
+
+def on(handler, names=All):
+    """Setup a handler to be called when a user interacts with any qgrid instance.
+
+        Parameters
+        ----------
+        handler : callable
+            A callable that is called when the event occurs. Its
+            signature should be ``handler(change)``, where ``change`` is a
+            dictionary. The change dictionary at least holds a 'name' and
+            'owner' key.
+            * ``name`` : the name of the event that occurred.
+            * ``owner`` : the QgridWidet instance in which the event occurred.
+            Other keys may be passed depending on the value of 'name'. In the
+            case where type is 'json updated'
+            * ``triggered_by`` : the user interaction that resulted in this event
+            * ``row_range`` : the range of rows that was serialized to json and
+            sent down to the browser
+        names : list, str, All
+            If names is All, the handler will apply to all events.  If a list
+            of str, handler will apply to all events named in the list.  If a
+            str, the handler will apply just the event with that name.
+    """
+    names = parse_notifier_name(names)
+    for n in names:
+        handlers.on(handler, n)
+
+
+def off(handler, names=All):
+    """Remove a qgrid event handler.
+
+        Parameters
+        ----------
+        handler : callable
+            A callable that is called when the event occurs.
+        names : list, str, All (default: All)
+            The names of the event for which the specified handler should be
+            uninstalled. If names is All, the specified handler is uninstalled
+            from the list of notifiers corresponding to all events.
+    """
+    names = parse_notifier_name(names)
+    for n in names:
+        handlers.off(handler, n)
 
 
 def set_grid_option(optname, optvalue):
@@ -472,6 +550,12 @@ class QgridWidget(widgets.DOMWidget):
                                   orient='table',
                                   date_format='iso',
                                   double_precision=self.precision)
+
+        handlers.notify_listeners({
+            'name': 'json updated',
+            'triggered_by': triggered_by,
+            'row_range': self._df_range
+        })
 
         if update_columns:
             self._interval_columns = []
