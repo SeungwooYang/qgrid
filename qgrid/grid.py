@@ -94,7 +94,7 @@ class _EventHandlers(object):
     def notify_listeners(self, event):
         callables = []
         callables.extend(self._listeners.get(event['name'], []))
-        callables.extend(self._listeners.get('All', []))
+        callables.extend(self._listeners.get(All, []))
 
         for c in callables:
             c(event)
@@ -144,7 +144,7 @@ def on(handler, names=All):
             * ``name`` : the name of the event that occurred.
             * ``owner`` : the QgridWidet instance in which the event occurred.
             Other keys may be passed depending on the value of 'name'. In the
-            case where type is 'json updated'
+            case where type is 'json_updated'
             * ``triggered_by`` : the user interaction that resulted in this event
             * ``row_range`` : the range of rows that was serialized to json and
             sent down to the browser
@@ -440,6 +440,7 @@ class QgridWidget(widgets.DOMWidget):
     _sort_ascending = Bool(True, sync=True)
 
     df = Instance(pd.DataFrame)
+    handlers = Instance(_EventHandlers)
     precision = Integer(6, sync=True)
     grid_options = Dict(sync=True)
     show_toolbar = Bool(False, sync=True)
@@ -551,10 +552,11 @@ class QgridWidget(widgets.DOMWidget):
                                   date_format='iso',
                                   double_precision=self.precision)
 
-        handlers.notify_listeners({
-            'name': 'json updated',
+        self._notify_listeners({
+            'name': 'json_updated',
             'triggered_by': triggered_by,
-            'row_range': self._df_range
+            'range_start': self._df_range[0],
+            'range_end': self._df_range[1]
         })
 
         if update_columns:
@@ -1049,15 +1051,12 @@ class QgridWidget(widgets.DOMWidget):
         elif content['type'] == 'filter_changed':
             self._handle_filter_changed(content)
 
-    def _trigger_df_change_event(self, location=None):
-        self.notify_change(Bunch(
-            name='_df',
-            old=None,
-            new=self._df,
-            owner=self,
-            type='change',
-            location=location,
-        ))
+    def _notify_listeners(self, event):
+        event['qgrid_widget'] = self
+        # notify listeners on this class instance
+        self.handlers.notify_listeners(event)
+        # notify listeners at the module level
+        handlers.notify_listeners(event)
 
     def get_changed_df(self):
         """
