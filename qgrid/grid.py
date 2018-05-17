@@ -440,7 +440,7 @@ class QgridWidget(widgets.DOMWidget):
     _sort_ascending = Bool(True, sync=True)
 
     df = Instance(pd.DataFrame)
-    handlers = Instance(_EventHandlers)
+    handlers = Instance(_EventHandlers, allow_none=True)
     precision = Integer(6, sync=True)
     grid_options = Dict(sync=True)
     show_toolbar = Bool(False, sync=True)
@@ -1051,10 +1051,21 @@ class QgridWidget(widgets.DOMWidget):
         elif content['type'] == 'filter_changed':
             self._handle_filter_changed(content)
 
+    def _trigger_df_change_event(self, location=None):
+        self.notify_change(Bunch(
+            name='_df',
+            old=None,
+            new=self._df,
+            owner=self,
+            type='change',
+            location=location,
+        ))
+
     def _notify_listeners(self, event):
         event['qgrid_widget'] = self
         # notify listeners on this class instance
-        self.handlers.notify_listeners(event)
+        if self.handlers is not None:
+            self.handlers.notify_listeners(event)
         # notify listeners at the module level
         handlers.notify_listeners(event)
 
