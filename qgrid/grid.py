@@ -7,6 +7,7 @@ from IPython.display import display
 from numbers import Integral
 from traitlets import Unicode, Instance, Bool, Integer, Dict, List, Tuple, Any, All, parse_notifier_name
 from traitlets.utils.bunch import Bunch
+from itertools import chain
 
 # versions of pandas prior to version 0.20.0 don't support the orient='table'
 # when calling the 'to_json' function on DataFrames.  to get around this we
@@ -74,13 +75,7 @@ class _EventHandlers(object):
         self._listeners = {}
 
     def on(self, name, handler):
-        if name not in self._listeners:
-            nlist = []
-            self._listeners[name] = nlist
-        else:
-            nlist = self._listeners[name]
-        if handler not in nlist:
-            nlist.append(handler)
+        self._listeners.setdefault(name, []).append(handler)
 
     def off(self, name, handler):
         try:
@@ -92,11 +87,9 @@ class _EventHandlers(object):
             pass
 
     def notify_listeners(self, event, qgrid_widget):
-        callables = []
-        callables.extend(self._listeners.get(event['name'], []))
-        callables.extend(self._listeners.get(All, []))
-
-        for c in callables:
+        event_listeners = self._listeners.get(event['name'], [])
+        all_listeners = self._listeners.get(All, [])
+        for c in chain(event_listeners, all_listeners):
             c(event, qgrid_widget)
 
 
@@ -132,26 +125,27 @@ def set_defaults(show_toolbar=None, precision=None, grid_options=None):
 
 
 def on(names, handler):
-    """Setup a handler to be called when a user interacts with any qgrid instance.
+    """
+    Setup a handler to be called when a user interacts with any qgrid instance.
 
-        Parameters
-        ----------
-        handler : callable
-            A callable that is called when the event occurs. Its
-            signature should be ``handler(change)``, where ``change`` is a
-            dictionary. The change dictionary at least holds a 'name' and
-            'owner' key.
-            * ``name`` : the name of the event that occurred.
-            * ``owner`` : the QgridWidet instance in which the event occurred.
-            Other keys may be passed depending on the value of 'name'. In the
-            case where type is 'json_updated'
-            * ``triggered_by`` : the user interaction that resulted in this event
-            * ``row_range`` : the range of rows that was serialized to json and
-            sent down to the browser
-        names : list, str, All
-            If names is All, the handler will apply to all events.  If a list
-            of str, handler will apply to all events named in the list.  If a
-            str, the handler will apply just the event with that name.
+    Parameters
+    ----------
+    handler : callable
+        A callable that is called when the event occurs. Its
+        signature should be ``handler(change)``, where ``change`` is a
+        dictionary. The change dictionary at least holds a 'name' and
+        'owner' key.
+        * ``name`` : the name of the event that occurred.
+        * ``owner`` : the QgridWidet instance in which the event occurred.
+        Other keys may be passed depending on the value of 'name'. In the
+        case where type is 'json_updated'
+        * ``triggered_by`` : the user interaction that resulted in this event
+        * ``row_range`` : the range of rows that was serialized to json and
+        sent down to the browser
+    names : list, str, All
+        If names is All, the handler will apply to all events.  If a list
+        of str, handler will apply to all events named in the list.  If a
+        str, the handler will apply just the event with that name.
     """
     names = parse_notifier_name(names)
     for n in names:
@@ -159,16 +153,17 @@ def on(names, handler):
 
 
 def off(names, handler):
-    """Remove a qgrid event handler.
+    """
+    Remove a qgrid event handler.
 
-        Parameters
-        ----------
-        handler : callable
-            A callable that is called when the event occurs.
-        names : list, str, All (default: All)
-            The names of the event for which the specified handler should be
-            uninstalled. If names is All, the specified handler is uninstalled
-            from the list of notifiers corresponding to all events.
+    Parameters
+    ----------
+    handler : callable
+        A callable that is called when the event occurs.
+    names : list, str, All (default: All)
+        The names of the event for which the specified handler should be
+        uninstalled. If names is All, the specified handler is uninstalled
+        from the list of notifiers corresponding to all events.
     """
     names = parse_notifier_name(names)
     for n in names:
