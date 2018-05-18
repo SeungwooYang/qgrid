@@ -73,7 +73,7 @@ class _EventHandlers(object):
     def __init__(self):
         self._listeners = {}
 
-    def on(self, handler, name):
+    def on(self, name, handler):
         if name not in self._listeners:
             nlist = []
             self._listeners[name] = nlist
@@ -82,7 +82,7 @@ class _EventHandlers(object):
         if handler not in nlist:
             nlist.append(handler)
 
-    def off(self, handler, name):
+    def off(self, name, handler):
         try:
             if handler is None:
                 del self._listeners[name]
@@ -91,13 +91,13 @@ class _EventHandlers(object):
         except KeyError:
             pass
 
-    def notify_listeners(self, event):
+    def notify_listeners(self, event, qgrid_widget):
         callables = []
         callables.extend(self._listeners.get(event['name'], []))
         callables.extend(self._listeners.get(All, []))
 
         for c in callables:
-            c(event)
+            c(event, qgrid_widget)
 
 
 defaults = _DefaultSettings()
@@ -131,7 +131,7 @@ def set_defaults(show_toolbar=None, precision=None, grid_options=None):
                           grid_options=grid_options)
 
 
-def on(handler, names=All):
+def on(names, handler):
     """Setup a handler to be called when a user interacts with any qgrid instance.
 
         Parameters
@@ -155,10 +155,10 @@ def on(handler, names=All):
     """
     names = parse_notifier_name(names)
     for n in names:
-        handlers.on(handler, n)
+        handlers.on(n, handler)
 
 
-def off(handler, names=All):
+def off(names, handler):
     """Remove a qgrid event handler.
 
         Parameters
@@ -172,7 +172,7 @@ def off(handler, names=All):
     """
     names = parse_notifier_name(names)
     for n in names:
-        handlers.off(handler, n)
+        handlers.off(n, handler)
 
 
 def set_grid_option(optname, optvalue):
@@ -1062,12 +1062,12 @@ class QgridWidget(widgets.DOMWidget):
         ))
 
     def _notify_listeners(self, event):
-        event['qgrid_widget'] = self
+        # notify listeners at the module level
+        handlers.notify_listeners(event, self)
+
         # notify listeners on this class instance
         if self.handlers is not None:
-            self.handlers.notify_listeners(event)
-        # notify listeners at the module level
-        handlers.notify_listeners(event)
+            self.handlers.notify_listeners(event, self)
 
     def get_changed_df(self):
         """
