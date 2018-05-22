@@ -446,6 +446,7 @@ class QgridWidget(widgets.DOMWidget):
         # register a callback for custom messages
         self.on_msg(self._handle_qgrid_msg)
         self._initialized = True
+        self.handlers = _EventHandlers()
         if self.df is not None:
             self._update_df()
 
@@ -993,11 +994,19 @@ class QgridWidget(widgets.DOMWidget):
                 if col_info['type'] == 'datetime':
                     val_to_set = pd.to_datetime(val_to_set)
 
+                old_value = self._df.at[location]
                 self._df.at[location] = val_to_set
                 query = self._unfiltered_df[self._index_col_name] == \
                     content['unfiltered_index']
                 self._unfiltered_df.loc[query, content['column']] = val_to_set
-                self._trigger_df_change_event(location)
+                self._notify_listeners({
+                    'name': 'cell_edited',
+                    'index': location[0],
+                    'column': location[1],
+                    'old': old_value,
+                    'new': val_to_set
+                })
+
             except (ValueError, TypeError):
                 msg = "Error occurred while attempting to edit the " \
                       "DataFrame. Check the notebook server logs for more " \
@@ -1010,14 +1019,36 @@ class QgridWidget(widgets.DOMWidget):
                 })
                 return
         elif content['type'] == 'selection_change':
+            old_selection = self._selected_rows
             self._selected_rows = content['rows']
+            self._notify_listeners({
+                'name': 'selection_changed',
+                'old': old_selection,
+                'new': self._selected_rows
+            })
         elif content['type'] == 'viewport_changed':
+            old_viewport_range = self._viewport_range
             self._viewport_range = (content['top'], content['bottom'])
             self._update_table(triggered_by='viewport_changed')
+            self._notify_listeners({
+                'name': 'viewport_changed',
+                'old': old_viewport_range,
+                'new': self._viewport_range
+            })
+
         elif content['type'] == 'add_row':
-            self.add_row()
+            row_index, row_values = self.add_row()
+            self._notify_listeners({
+                'name': 'row_added',
+                'index': row_index,
+                'values': row_values
+            })
         elif content['type'] == 'remove_row':
-            self.remove_row()
+            removed_indices = self.remove_row()
+            self._notify_listeners({
+                'name': 'row_removed',
+                'indices': removed_indices
+            })
         elif content['type'] == 'viewport_changed_filter':
             col_name = content['field']
             col_info = self._columns[col_name]
@@ -1026,6 +1057,7 @@ class QgridWidget(widgets.DOMWidget):
             from_index = max(content['top'] - PAGE_SIZE, 0)
             to_index = max(content['top'] + PAGE_SIZE, 0)
 
+            old_range = col_info['value_range']
             col_info['values'] = col_filter_table[from_index:to_index]
             col_info['value_range'] = (from_index, to_index)
             self._columns[col_name] = col_info
@@ -1034,27 +1066,43 @@ class QgridWidget(widgets.DOMWidget):
                 'field': col_name,
                 'col_info': col_info
             })
+            self._notify_listeners({
+                'name': 'text_filter_viewport_changed',
+                'column': col_name,
+                'old': old_range,
+                'new': col_info['value_range']
+            })
         elif content['type'] == 'sort_changed':
+            old_column = self._sort_field
+            old_ascending = self._sort_ascending
             self._sort_field = content['sort_field']
             self._sort_ascending = content['sort_ascending']
             self._sorted_column_cache = {}
             self._update_sort()
             self._update_table(triggered_by='sort_changed')
-            self._trigger_df_change_event()
+            self._notify_listeners({
+                'name': 'sort_changed',
+                'old': {
+                    'column': old_column,
+                    'ascending': old_ascending
+                },
+                'new': {
+                    'column': self._sort_field,
+                    'ascending': self._sort_ascending
+                }
+            })
         elif content['type'] == 'get_column_min_max':
             self._handle_get_column_min_max(content)
+            self._notify_listeners({
+                'name': 'filter_dropdown_shown',
+                'column': content['field']
+            })
         elif content['type'] == 'filter_changed':
             self._handle_filter_changed(content)
-
-    def _trigger_df_change_event(self, location=None):
-        self.notify_change(Bunch(
-            name='_df',
-            old=None,
-            new=self._df,
-            owner=self,
-            type='change',
-            location=location,
-        ))
+            self._notify_listeners({
+                'name': 'filter_changed',
+                'column': content['field']
+            })
 
     def _notify_listeners(self, event):
         # notify listeners at the module level
@@ -1122,7 +1170,7 @@ class QgridWidget(widgets.DOMWidget):
         self._unfiltered_df.loc[last.name] = last.values
         self._update_table(triggered_by='add_row',
                            scroll_to_row=df.index.get_loc(last.name))
-        self._trigger_df_change_event()
+        return (last.name, last.values)
 
     def remove_row(self):
         """
@@ -1142,7 +1190,7 @@ class QgridWidget(widgets.DOMWidget):
         self._unfiltered_df.drop(selected_names, inplace=True)
         self._selected_rows = []
         self._update_table(triggered_by='remove_row')
-        self._trigger_df_change_event()
+        return selected_names
 
 
 # Alias for legacy support, since we changed the capitalization

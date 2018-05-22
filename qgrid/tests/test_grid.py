@@ -1,7 +1,8 @@
 from qgrid import (
     QgridWidget,
     set_defaults,
-    show_grid
+    show_grid,
+    on as qgrid_on
 )
 import numpy as np
 import pandas as pd
@@ -41,6 +42,7 @@ def test_edit_date():
     check_edit_success(view,
                        'Date',
                        3,
+                       pd.Timestamp('2013-01-02 00:00:00'),
                        "2013-01-02T00:00:00.000Z",
                        pd.Timestamp('2013-01-16 00:00:00'),
                        "2013-01-16T00:00:00.000Z")
@@ -48,19 +50,25 @@ def test_edit_date():
 def check_edit_success(widget,
                        col_name,
                        row_index,
-                       old_value,
+                       old_val_obj,
+                       old_val_json,
                        new_val_obj,
                        new_val_json):
 
-    observer_called = {}
-    def on_value_change(change):
-        observer_called['called'] = True
-        assert change['new'][col_name][row_index] == new_val_obj
+    listener_called = {}
+    def on_cell_edited(event, qgrid_widget):
+        listener_called['called'] = True
+        assert event['name'] == 'cell_edited'
+        assert event['index'] == row_index
+        assert event['column'] == col_name
+        assert event['old'] == old_val_obj
+        assert event['new'] == new_val_obj
+        assert qgrid_widget._df[col_name][row_index] == new_val_obj
 
-    widget.observe(on_value_change, names=['_df'])
+    widget.handlers.on('cell_edited', on_cell_edited)
 
     grid_data = json.loads(widget._df_json)['data']
-    assert grid_data[row_index][col_name] == old_value
+    assert grid_data[row_index][col_name] == old_val_json
 
     widget._handle_qgrid_msg_helper({
         'column': col_name,
@@ -70,8 +78,8 @@ def check_edit_success(widget,
         'value': new_val_json
     })
 
-    assert observer_called['called']
-    widget.unobserve(on_value_change, names=['_df'])
+    assert listener_called['called']
+    widget.handlers.off('cell_edited', on_cell_edited)
 
     # call _update_table so the widget updates _df_json
     widget._update_table(fire_data_change_event=False)
@@ -83,24 +91,26 @@ def test_edit_number():
     view = QgridWidget(df=create_df())
 
     for idx in range(-10, 10, 1):
-        check_edit_success(view, 'D', 2, old_val, idx, idx)
+        check_edit_success(view, 'D', 2, old_val, old_val, idx, idx)
         old_val = idx
 
 def test_add_row():
     view = QgridWidget(df=create_df())
 
-    observer_called = {}
-    def on_value_change(change):
-        observer_called['called'] = True
-        assert len(change['new']) == 5
+    listener_called = {}
+    def on_row_added(event, qgrid_widget):
+        listener_called['called'] = True
+        assert len(qgrid_widget._df) == 5
+        assert event['name'] == 'row_added'
+        assert event['index'] == 4
 
-    view.observe(on_value_change, names=['_df'])
+    view.handlers.on('row_added', on_row_added)
 
     view._handle_qgrid_msg_helper({
         'type': 'add_row'
     })
 
-    assert observer_called['called']
+    assert listener_called['called']
 
 def test_mixed_type_column():
     df = pd.DataFrame({'A': [1.2, 'xy', 4], 'B': [3, 4, 5]})
@@ -252,11 +262,11 @@ def test_date_index():
 def test_multi_index():
     view = QgridWidget(df=create_multi_index_df())
 
-    observer_called = {'count': 0}
-    def on_value_change(_):
-        observer_called['count'] += 1
+    listener_called = {'filter_dropdown_shown': 0, 'filter_changed': 0, 'sort_changed': 0}
+    def on_change(event, qgrid_widget):
+        listener_called[event['name']] += 1
 
-    view.observe(on_value_change, names=['_df'])
+    qgrid_on(['filter_dropdown_shown', 'filter_changed', 'sort_changed'], on_change)
 
     view._handle_qgrid_msg_helper({
         'type': 'get_column_min_max',
@@ -298,7 +308,9 @@ def test_multi_index():
         'sort_ascending': True
     })
 
-    assert observer_called['count'] == 4
+    assert listener_called['filter_dropdown_shown'] == 1
+    assert listener_called['filter_changed'] == 2
+    assert listener_called['sort_changed'] == 2
 
 def test_interval_index():
     df = create_interval_index_df()
